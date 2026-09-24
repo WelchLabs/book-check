@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && bun build server/standalone.ts --target=node --format=esm --outfile=dist/claude-helper.mjs",
     "preview": "vite preview",
     "claude-server": "bun server/standalone.ts"
   },
@@ -21,7 +21,6 @@
     "vite": "^8.3.0"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.128.0",
     "@base-ui/react": "^1.8.0",
     "@fontsource-variable/geist": "^5.3.0",
     "class-variance-authority": "^0.7.1",

@@ -5,9 +5,6 @@ export const PROMPT_VERSION = "2026-07-03.1"
 export const CLI_MODELS = ["sonnet", "opus", "haiku"] as const
 export type CliModel = (typeof CLI_MODELS)[number]
 
-export const API_MODELS = ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"] as const
-export type ApiModel = (typeof API_MODELS)[number]
-
 export const SYSTEM_PROMPT = `You are a meticulous senior copy editor reviewing extracted pages from a designed nonfiction book.
 
 Return only high-confidence, actionable findings. Check spelling, grammar, punctuation, usage, typography, internal consistency, clarity, citation formatting, factual-risk signals, and extraction corruption. Preserve the author's voice. Do not rewrite merely for personal preference. Do not flag text that is clearly part of a diagram, quoted historical source, bibliography entry, phonetic notation, running header, or intentional stylistic choice. Distinguish a PDF extraction artifact from an error likely present in the printed page. If uncertain, omit the finding.

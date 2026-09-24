@@ -6,6 +6,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { claudeCliPlugin } from './server/claude-cli.ts'
 
 export default defineConfig({
+  base: process.env.BASE_PATH ?? '/',
   plugins: [react(), tailwindcss(), claudeCliPlugin()],
   build: {
     rolldownOptions: {

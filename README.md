@@ -1,45 +1,94 @@
 # Welch Labs Book Check
 
-Upload a PDF of a book and get an editorial review of it in the browser. Local checks catch spelling, repeated words, common grammar mistakes, spacing, and inconsistent styles. Claude then reviews the text section by section, and both sets of findings are merged into one report.
+Check a book PDF for spelling, grammar, and style problems, right in your browser.
 
-## Run it locally
+**Open the site:** https://welchlabs.github.io/book-check/
+
+## Quick start
+
+1. Open the site.
+2. Drop your book PDF onto the page.
+3. Press the start button, then read through the findings and remove any that are wrong.
+
+That runs the built in checks. To also have Claude review the book, follow the setup steps below.
+
+## Set up Claude reviews
+
+You do not need to download this project. You only need Claude Code, Node.js, and one command.
+
+### Mac
+
+1. **Open Terminal.** Press Cmd and Space, type `Terminal`, press Return.
+2. **Install Claude Code.** Paste this and press Return:
+   ```sh
+   curl -fsSL https://claude.ai/install.sh | bash
+   ```
+3. **Sign in to Claude.** If the command is not found, close Terminal, open it again, and retry.
+   ```sh
+   claude auth login
+   ```
+4. **Install Node.js.** Download the LTS version from [nodejs.org](https://nodejs.org/en/download) and open the installer.
+5. **Start the helper.** Keep this window open while you use the site.
+   ```sh
+   curl -fsSL https://welchlabs.github.io/book-check/claude-helper.mjs --create-dirs -o ~/.book-check/claude-helper.mjs && node ~/.book-check/claude-helper.mjs
+   ```
+6. **Go back to the site.** A switch to review with Claude now appears.
+
+Next time, open Terminal and run only:
 
 ```sh
+node ~/.book-check/claude-helper.mjs
+```
+
+### Windows
+
+1. **Open PowerShell.** Press the Windows key, type `PowerShell`, press Enter.
+2. **Install Claude Code.**
+   ```powershell
+   irm https://claude.ai/install.ps1 | iex
+   ```
+3. **Sign in to Claude.** If the command is not found, close PowerShell, open it again, and retry.
+   ```powershell
+   claude auth login
+   ```
+4. **Install Node.js.** Download the LTS version from [nodejs.org](https://nodejs.org/en/download) and open the installer.
+5. **Start the helper.** Keep this window open while you use the site.
+   ```powershell
+   curl.exe -fsSL https://welchlabs.github.io/book-check/claude-helper.mjs --create-dirs -o $HOME\.book-check\claude-helper.mjs; node $HOME\.book-check\claude-helper.mjs
+   ```
+6. **Go back to the site.** A switch to review with Claude now appears.
+
+Next time, open PowerShell and run only:
+
+```powershell
+node $HOME\.book-check\claude-helper.mjs
+```
+
+The same steps are on the site under the help button in the top right.
+
+## Good to know
+
+- **Browser:** use Chrome, Edge, or Firefox. Safari blocks the site from talking to the helper. If Chrome asks to access devices on your local network, allow it.
+- **Cost:** reviews use your Claude plan.
+- **Privacy:** the helper only runs on your computer and only answers this site.
+- **Saving:** your results stay in the browser after a reload. Use the save button to get a JSON file you can send to someone. They drop it onto the site to see the same report.
+
+## For developers
+
+```sh
+git clone git@github.com:WelchLabs/book-check.git
+cd book-check
 bun install
 bun run dev
 ```
 
-When the site runs through Vite, it reviews with your local `claude -p` login if Claude Code is installed and signed in. Otherwise, paste an Anthropic API key on the start page, or leave it empty to run only the local checks.
+Running through `bun run dev` reviews with your local `claude -p` login directly, so the helper is not needed.
 
-## Using claude -p with the hosted site
+| Command | What it does |
+| --- | --- |
+| `bun run dev` | Starts the site with the local Claude endpoint |
+| `bun run build` | Type checks and builds the site and `claude-helper.mjs` into `dist` |
+| `bun run preview` | Serves the built site with the local Claude endpoint |
+| `bun run claude-server` | Runs the helper from source |
 
-The hosted site on GitHub Pages at https://welchlabs.github.io/book-check/ is only static files, so it cannot run `claude -p` by itself. To review with your Claude Code login there, run a small helper on your own computer:
-
-```sh
-bun install
-bun run claude-server
-```
-
-The helper listens on `http://localhost:4317` and runs `claude -p` for each section the site sends it. Leave it running, then open or return to the hosted site. It finds the helper on its own and shows the switch to review with your `claude -p` login. Stop the helper with Ctrl+C when you are done.
-
-Things to know:
-
-- You need Claude Code installed and signed in (`claude auth login`). Reviews use your Claude Code plan, not an API key. Any API key in your shell is ignored.
-- The helper only listens on your own computer and only answers the hosted site and pages served from `localhost`. Requests from any other website are refused.
-- To allow another site, such as a fork on a different domain, list it when starting the helper: `BOOK_CHECK_ORIGINS=https://example.github.io bun run claude-server`.
-- To use a different port, set `PORT`, for example `PORT=5000 bun run claude-server`. The hosted site only looks on port 4317, so this is mainly useful for local copies.
-- Chrome, Edge, and Firefox allow the hosted site to reach the helper. Chrome may ask for permission to access devices on your local network the first time; allow it. Safari blocks secure sites from calling `http://localhost`, so use another browser or run the site locally with `bun run dev`.
-
-## Using it
-
-- Drop a PDF onto the start page to check it. Add a plain text word list with it to allow custom spellings.
-- Choose how many Claude reviews run at the same time, how many words each review reads, and which model to use.
-- Remove findings that are wrong. Your changes are saved in the browser and come back after a reload.
-- Save the results as a JSON file to share. Anyone can drop that file onto the site to open the same report.
-
-## Scripts
-
-- `bun run dev` starts the site with the local Claude endpoint.
-- `bun run build` type checks and builds the site into `dist`.
-- `bun run preview` serves the built site, also with the local Claude endpoint.
-- `bun run claude-server` runs the helper that lets the hosted site review with `claude -p`.
+The helper listens on `http://localhost:4317`. Set `PORT` to change it, or `BOOK_CHECK_ORIGINS` to allow another site, for example `BOOK_CHECK_ORIGINS=https://example.github.io`.

@@ -6,14 +6,15 @@ import {
   Bot,
   BrainCircuit,
   CircleAlert,
+  CircleHelp,
   FileText,
   History,
   FileUp,
   Info,
-  KeyRound,
   Layers,
   Loader2,
   Moon,
+  Play,
   RefreshCw,
   RotateCcw,
   Save,
@@ -28,6 +29,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
+import { SetupGuide } from "@/components/setup-guide"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -52,18 +54,16 @@ import {
 import { parseAllowlist } from "@/lib/local-checks"
 import { runPipeline, type Stage } from "@/lib/pipeline"
 import { downloadFile, markdownReport, reportBaseName } from "@/lib/report"
-import { API_MODELS, CLI_MODELS, type ApiModel, type CliModel } from "@/lib/review-spec"
+import { CLI_MODELS, type CliModel } from "@/lib/review-spec"
 import { parseSavedReport } from "@/lib/saved-report"
 import { countFindings, type Finding, type ReviewReport, type Severity } from "@/lib/types"
 
-const API_KEY_STORAGE = "book-check:api-key"
 const SETTINGS_STORAGE = "book-check:settings"
 
 interface Settings {
   workers: number
   chunkWords: number
   cliModel: CliModel
-  apiModel: ApiModel
   refreshAi: boolean
 }
 
@@ -71,7 +71,6 @@ const DEFAULT_SETTINGS: Settings = {
   workers: 2,
   chunkWords: 2200,
   cliModel: "sonnet",
-  apiModel: "claude-opus-5",
   refreshAi: false,
 }
 
@@ -115,14 +114,6 @@ function readSettings(): Settings {
     return text ? { ...DEFAULT_SETTINGS, ...JSON.parse(text) } : DEFAULT_SETTINGS
   } catch {
     return DEFAULT_SETTINGS
-  }
-}
-
-function readStoredKey(): string {
-  try {
-    return localStorage.getItem(API_KEY_STORAGE) ?? ""
-  } catch {
-    return ""
   }
 }
 
@@ -199,7 +190,6 @@ function ModelSelect<T extends string>({
 }
 
 export default function App() {
-  const [apiKey, setApiKey] = useState(readStoredKey)
   const [settings, setSettings] = useState<Settings>(readSettings)
   const [report, setReport] = useState<ReviewReport | null>(null)
   const [removed, setRemoved] = useState<{ finding: Finding; index: number }[]>([])
@@ -210,6 +200,8 @@ export default function App() {
   const [cliEndpoint, setCliEndpoint] = useState<string | null>(null)
   const [useCli, setUseCli] = useState(true)
   const [history, setHistory] = useState<HistoryEntry[]>([])
+  const [guideOpen, setGuideOpen] = useState(false)
+  const [pending, setPending] = useState<{ pdf: File; allowedWords: string[] } | null>(null)
 
   useEffect(() => {
     const checkCli = () => claudeCliStatus().then((status) => setCliEndpoint(status.ready ? status.endpoint : null))
@@ -235,11 +227,7 @@ export default function App() {
   const busy = stage !== null
   const cliReady = cliEndpoint !== null
   const usingCli = cliReady && useCli
-  const provider: Provider | null = usingCli
-    ? { kind: "cli", model: settings.cliModel, endpoint: cliEndpoint }
-    : apiKey.trim()
-      ? { kind: "api", apiKey: apiKey.trim(), model: settings.apiModel }
-      : null
+  const provider: Provider | null = usingCli ? { kind: "cli", model: settings.cliModel, endpoint: cliEndpoint } : null
 
   function openReport(next: ReviewReport | null, isNew = false) {
     if (!next) setCurrentReport(null).catch(() => {})
@@ -283,32 +271,45 @@ export default function App() {
     const pdf = files.find((f) => f.name.toLowerCase().endsWith(".pdf") || f.type === "application/pdf")
     const others = await Promise.all(files.filter((f) => f !== pdf).map(async (f) => ({ file: f, text: await f.text() })))
     const saved = others.map((o) => parseSavedReport(o.text)).find((r) => r !== null)
-    const wordLists = others.filter((o) => !o.text.trimStart().startsWith("{"))
+    const allowedWords = others
+      .filter((o) => !o.text.trimStart().startsWith("{"))
+      .flatMap((o) => parseAllowlist(o.text))
 
+    if (!pdf && saved) {
+      openReport(saved)
+      return
+    }
+    if (pdf) {
+      setPending({ pdf, allowedWords })
+      return
+    }
+    if (pending && allowedWords.length) {
+      setPending({ ...pending, allowedWords: [...pending.allowedWords, ...allowedWords] })
+      return
+    }
+    const json = others.find((o) => o.text.trimStart().startsWith("{"))
+    setError(
+      json
+        ? `${json.file.name} is not a saved Book Check result.`
+        : "Choose a PDF to check, or a saved results JSON file to open.",
+    )
+  }
+
+  async function startCheck() {
+    if (!pending) return
+    setError("")
     try {
-      if (!pdf && saved) {
-        openReport(saved)
-        return
-      }
-      if (!pdf) {
-        const json = others.find((o) => o.text.trimStart().startsWith("{"))
-        throw new Error(
-          json
-            ? `${json.file.name} is not a saved Book Check result.`
-            : "Choose a PDF to check, or a saved results JSON file to open.",
-        )
-      }
-
       const result = await runPipeline({
-        file: pdf,
+        file: pending.pdf,
         provider,
-        allowedWords: wordLists.flatMap((o) => parseAllowlist(o.text)),
+        allowedWords: pending.allowedWords,
         refreshAi: settings.refreshAi,
         workers: settings.workers,
         chunkWords: settings.chunkWords,
         onStage: setStage,
         onProgress: (done, total) => setProgress({ done, total }),
       })
+      setPending(null)
       openReport(result, true)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -361,6 +362,11 @@ export default function App() {
                 </IconTip>
               </>
             )}
+            <IconTip label="How to set up Claude reviews from scratch">
+              <Button variant="ghost" size="icon" onClick={() => setGuideOpen(true)}>
+                <CircleHelp />
+              </Button>
+            </IconTip>
             <ThemeButton />
           </div>
         </header>
@@ -374,31 +380,15 @@ export default function App() {
                 <Switch checked={useCli} disabled={busy} onCheckedChange={setUseCli} />
               </label>
             )}
-            {!usingCli && (
-              <div className="relative">
-                <KeyRound className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  type="password"
-                  className="pl-9"
-                  placeholder="Anthropic API key, leave empty to skip the Claude review"
-                  value={apiKey}
-                  disabled={busy}
-                  onChange={(e) => {
-                    setApiKey(e.target.value)
-                    writeStored(API_KEY_STORAGE, e.target.value)
-                  }}
-                />
-              </div>
-            )}
             {!cliReady && (
-              <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                <SquareTerminal className="size-3.5 shrink-0" />
-                <span>
-                  To review with your claude -p login instead, run{" "}
-                  <code className="rounded bg-muted px-1 py-0.5 font-mono">bun run claude-server</code> on your
-                  computer and come back to this page.
-                </span>
-              </p>
+              <button
+                type="button"
+                className="flex w-fit items-center gap-2 text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+                onClick={() => setGuideOpen(true)}
+              >
+                <CircleHelp className="size-4 shrink-0" />
+                Follow the setup guide to have Claude review your book with your own Claude account
+              </button>
             )}
 
             {provider && (
@@ -427,21 +417,12 @@ export default function App() {
                     <span className="w-12 text-right text-sm font-medium tabular-nums">{settings.chunkWords}</span>
                   </SettingRow>
                   <SettingRow icon={BrainCircuit} label="Model that reviews each section">
-                    {usingCli ? (
-                      <ModelSelect
-                        value={settings.cliModel}
-                        options={CLI_MODELS}
-                        disabled={busy}
-                        onChange={(cliModel) => updateSettings({ cliModel })}
-                      />
-                    ) : (
-                      <ModelSelect
-                        value={settings.apiModel}
-                        options={API_MODELS}
-                        disabled={busy}
-                        onChange={(apiModel) => updateSettings({ apiModel })}
-                      />
-                    )}
+                    <ModelSelect
+                      value={settings.cliModel}
+                      options={CLI_MODELS}
+                      disabled={busy}
+                      onChange={(cliModel) => updateSettings({ cliModel })}
+                    />
                   </SettingRow>
                   <SettingRow icon={RefreshCw} label="Review every section again instead of reusing earlier results">
                     <Switch
@@ -474,6 +455,19 @@ export default function App() {
                       <Progress value={(progress.done / progress.total) * 100} className="w-64" />
                     )}
                   </>
+                ) : pending ? (
+                  <>
+                    <FileText className="size-8 text-foreground" />
+                    <div className="flex flex-col gap-1">
+                      <p className="text-sm font-medium break-all">{pending.pdf.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {(pending.pdf.size / 1024 / 1024).toFixed(1)} MB
+                        {pending.allowedWords.length > 0 &&
+                          `, ${pending.allowedWords.length} allowed spellings from your word list`}
+                        . Drop or click to choose a different file.
+                      </p>
+                    </div>
+                  </>
                 ) : (
                   <>
                     <FileUp className="size-8 text-muted-foreground" />
@@ -485,6 +479,13 @@ export default function App() {
                 )}
               </CardContent>
             </Card>
+
+            {pending && (
+              <Button size="lg" className="h-11 w-full text-base" disabled={busy} onClick={startCheck}>
+                {busy ? <Loader2 className="animate-spin" /> : <Play />}
+                {provider ? "Start the check with Claude and the built in checks" : "Start the built in checks"}
+              </Button>
+            )}
 
             {error && (
               <Alert variant="destructive">
@@ -539,6 +540,7 @@ export default function App() {
 
         {report && <ReportView report={report} onRemove={removeFinding} />}
       </main>
+      <SetupGuide open={guideOpen} onOpenChange={setGuideOpen} />
     </div>
   )
 }
