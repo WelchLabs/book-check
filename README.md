@@ -10,7 +10,7 @@ Check a book PDF for spelling, grammar, and style problems, right in your browse
 2. Drop your book PDF onto the page.
 3. Press the start button, then read through the findings and remove any that are wrong.
 
-That runs the built in checks. To also have Claude review the book, follow the setup steps below.
+That runs the built in checks. To also have Claude review the book, follow the setup steps below or use an Anthropic API key.
 
 ## Set up Claude reviews
 
@@ -66,29 +66,17 @@ node $HOME\.book-check\claude-helper.mjs
 
 The same steps are on the site under the help button in the top right.
 
+## Use an Anthropic API key instead
+
+If you have an Anthropic API key, you can skip the setup above. Paste the key into the key field on the start page, and Claude reviews the book directly from your browser. The key is only stored in your browser.
+
+## Choosing a model
+
+Both ways of reviewing offer the same models on the start page: Claude Fable 5.1, Claude Opus 5.5, Claude Opus 5, Claude Sonnet 5, and Claude Haiku 4.5. Fable and Opus are the most capable. Sonnet and Haiku are faster and use less of your plan or credits.
+
 ## Good to know
 
 - **Browser:** use Chrome, Edge, or Firefox. Safari blocks the site from talking to the helper. If Chrome asks to access devices on your local network, allow it.
-- **Cost:** reviews use your Claude plan.
+- **Cost:** reviews through the helper use your Claude plan. Reviews with an API key are billed to that key.
 - **Privacy:** the helper only runs on your computer and only answers this site.
 - **Saving:** your results stay in the browser after a reload. Use the save button to get a JSON file you can send to someone. They drop it onto the site to see the same report.
-
-## For developers
-
-```sh
-git clone git@github.com:WelchLabs/book-check.git
-cd book-check
-bun install
-bun run dev
-```
-
-Running through `bun run dev` reviews with your local `claude -p` login directly, so the helper is not needed.
-
-| Command | What it does |
-| --- | --- |
-| `bun run dev` | Starts the site with the local Claude endpoint |
-| `bun run build` | Type checks and builds the site and `claude-helper.mjs` into `dist` |
-| `bun run preview` | Serves the built site with the local Claude endpoint |
-| `bun run claude-server` | Runs the helper from source |
-
-The helper listens on `http://localhost:4317`. Set `PORT` to change it, or `BOOK_CHECK_ORIGINS` to allow another site, for example `BOOK_CHECK_ORIGINS=https://example.github.io`.

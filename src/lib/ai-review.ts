@@ -1,11 +1,56 @@
 import { findingId, sha256Hex } from "./hashing"
 import { readChunkCache, writeChunkCache } from "./history"
-import { PROMPT_VERSION, type CliModel, type RawChunkReview } from "./review-spec"
+import {
+  FALLBACK_MODELS,
+  PROMPT_VERSION,
+  ReviewSchema,
+  SYSTEM_PROMPT,
+  userPrompt,
+  type ApiModel,
+  type CliModel,
+  type RawChunkReview,
+} from "./review-spec"
 import type { AiUsage, ChunkData, Finding } from "./types"
 
-export type Provider = { kind: "cli"; model: CliModel; endpoint: string }
+export type Provider =
+  | { kind: "cli"; model: CliModel; endpoint: string }
+  | { kind: "api"; apiKey: string; model: ApiModel }
 
 type Reviewer = (text: string) => Promise<RawChunkReview>
+
+class AuthError extends Error {}
+
+async function apiReviewer(apiKey: string, model: ApiModel): Promise<Reviewer> {
+  const [{ default: Anthropic }, { betaZodOutputFormat }] = await Promise.all([
+    import("@anthropic-ai/sdk"),
+    import("@anthropic-ai/sdk/helpers/beta/zod"),
+  ])
+  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true })
+  return async (text) => {
+    try {
+      const response = await client.beta.messages.parse({
+        model,
+        max_tokens: 16000,
+        ...(FALLBACK_MODELS.includes(model)
+          ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }
+          : {}),
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content: userPrompt(text) }],
+        output_config: { format: betaZodOutputFormat(ReviewSchema) },
+      })
+      if (response.stop_reason === "refusal") throw new Error("Claude declined to review this excerpt.")
+      if (!response.parsed_output) throw new Error("Claude completed without a structured result.")
+      return {
+        result: response.parsed_output,
+        input_tokens: response.usage.input_tokens,
+        output_tokens: response.usage.output_tokens,
+      }
+    } catch (error) {
+      if (error instanceof Anthropic.AuthenticationError) throw new AuthError("The Anthropic API key was rejected.")
+      throw error
+    }
+  }
+}
 
 export const HELPER_URL = "http://localhost:4317"
 
@@ -43,7 +88,7 @@ interface ChunkReview {
 }
 
 const cacheKey = (chunk: ChunkData, provider: Provider) =>
-  sha256Hex([PROMPT_VERSION, "claude", provider.model, chunk.text].join("\u001f"))
+  sha256Hex([PROMPT_VERSION, provider.kind === "cli" ? "claude" : "claude-api", provider.model, chunk.text].join("\u001f"))
 
 async function reviewChunk(
   review: Reviewer,
@@ -92,7 +137,10 @@ export async function runAiReview(
   workers: number,
   progress: (done: number, total: number) => void,
 ): Promise<{ findings: Finding[]; usage: AiUsage; errors: string[] }> {
-  const review = cliReviewer(provider.model, provider.endpoint)
+  const review =
+    provider.kind === "cli"
+      ? cliReviewer(provider.model, provider.endpoint)
+      : await apiReviewer(provider.apiKey, provider.model)
   const reviews: ChunkReview[] = []
   const errors: string[] = []
   let next = 0
@@ -104,6 +152,11 @@ export async function runAiReview(
       try {
         reviews.push(await reviewChunk(review, provider, chunk, refresh))
       } catch (error) {
+        if (error instanceof AuthError) {
+          if (!errors.includes(error.message)) errors.push(error.message)
+          next = chunks.length
+          break
+        }
         errors.push(`${chunk.id}: ${error instanceof Error ? error.message : String(error)}`)
       }
       progress(++done, chunks.length)

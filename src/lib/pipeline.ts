@@ -85,7 +85,7 @@ export async function runPipeline(options: PipelineOptions): Promise<ReviewRepor
     created_at: new Date().toISOString(),
     document,
     findings,
-    ai_provider: provider ? "claude" : null,
+    ai_provider: provider ? (provider.kind === "cli" ? "claude" : "claude-api") : null,
     ai_model: provider?.model ?? null,
     ai_state: aiState,
     ai_message: aiMessage,

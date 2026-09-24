@@ -11,6 +11,7 @@ import {
   History,
   FileUp,
   Info,
+  KeyRound,
   Layers,
   Loader2,
   Moon,
@@ -54,23 +55,26 @@ import {
 import { parseAllowlist } from "@/lib/local-checks"
 import { runPipeline, type Stage } from "@/lib/pipeline"
 import { downloadFile, markdownReport, reportBaseName } from "@/lib/report"
-import { CLI_MODELS, type CliModel } from "@/lib/review-spec"
+import { API_MODELS, CLI_MODELS, MODEL_LABELS, type ApiModel, type CliModel } from "@/lib/review-spec"
 import { parseSavedReport } from "@/lib/saved-report"
 import { countFindings, type Finding, type ReviewReport, type Severity } from "@/lib/types"
 
 const SETTINGS_STORAGE = "book-check:settings"
+const API_KEY_STORAGE = "book-check:api-key"
 
 interface Settings {
   workers: number
   chunkWords: number
   cliModel: CliModel
+  apiModel: ApiModel
   refreshAi: boolean
 }
 
 const DEFAULT_SETTINGS: Settings = {
   workers: 2,
   chunkWords: 2200,
-  cliModel: "sonnet",
+  cliModel: "claude-sonnet-5",
+  apiModel: "claude-opus-5",
   refreshAi: false,
 }
 
@@ -111,9 +115,22 @@ const STAGE_TEXT: Record<Stage, (done: number, total: number) => string> = {
 function readSettings(): Settings {
   try {
     const text = localStorage.getItem(SETTINGS_STORAGE)
-    return text ? { ...DEFAULT_SETTINGS, ...JSON.parse(text) } : DEFAULT_SETTINGS
+    const stored: Settings = text ? { ...DEFAULT_SETTINGS, ...JSON.parse(text) } : DEFAULT_SETTINGS
+    return {
+      ...stored,
+      cliModel: CLI_MODELS.includes(stored.cliModel) ? stored.cliModel : DEFAULT_SETTINGS.cliModel,
+      apiModel: API_MODELS.includes(stored.apiModel) ? stored.apiModel : DEFAULT_SETTINGS.apiModel,
+    }
   } catch {
     return DEFAULT_SETTINGS
+  }
+}
+
+function readStoredKey(): string {
+  try {
+    return localStorage.getItem(API_KEY_STORAGE) ?? ""
+  } catch {
+    return ""
   }
 }
 
@@ -171,7 +188,7 @@ function ModelSelect<T extends string>({
   return (
     <Select
       value={value}
-      items={options.map((option) => ({ value: option, label: option }))}
+      items={options.map((option) => ({ value: option, label: MODEL_LABELS[option as CliModel] ?? option }))}
       disabled={disabled}
       onValueChange={(v) => v && onChange(v as T)}
     >
@@ -181,7 +198,7 @@ function ModelSelect<T extends string>({
       <SelectContent alignItemWithTrigger={false}>
         {options.map((option) => (
           <SelectItem key={option} value={option}>
-            {option}
+            {MODEL_LABELS[option as CliModel] ?? option}
           </SelectItem>
         ))}
       </SelectContent>
@@ -191,6 +208,7 @@ function ModelSelect<T extends string>({
 
 export default function App() {
   const [settings, setSettings] = useState<Settings>(readSettings)
+  const [apiKey, setApiKey] = useState(readStoredKey)
   const [report, setReport] = useState<ReviewReport | null>(null)
   const [removed, setRemoved] = useState<{ finding: Finding; index: number }[]>([])
   const [unsaved, setUnsaved] = useState(false)
@@ -227,7 +245,11 @@ export default function App() {
   const busy = stage !== null
   const cliReady = cliEndpoint !== null
   const usingCli = cliReady && useCli
-  const provider: Provider | null = usingCli ? { kind: "cli", model: settings.cliModel, endpoint: cliEndpoint } : null
+  const provider: Provider | null = usingCli
+    ? { kind: "cli", model: settings.cliModel, endpoint: cliEndpoint }
+    : apiKey.trim()
+      ? { kind: "api", apiKey: apiKey.trim(), model: settings.apiModel }
+      : null
 
   function openReport(next: ReviewReport | null, isNew = false) {
     if (!next) setCurrentReport(null).catch(() => {})
@@ -380,6 +402,22 @@ export default function App() {
                 <Switch checked={useCli} disabled={busy} onCheckedChange={setUseCli} />
               </label>
             )}
+            {!usingCli && (
+              <div className="relative">
+                <KeyRound className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  type="password"
+                  className="pl-9"
+                  placeholder="Anthropic API key for the Claude review, or leave empty to run only the built in checks"
+                  value={apiKey}
+                  disabled={busy}
+                  onChange={(e) => {
+                    setApiKey(e.target.value)
+                    writeStored(API_KEY_STORAGE, e.target.value)
+                  }}
+                />
+              </div>
+            )}
             {!cliReady && (
               <button
                 type="button"
@@ -387,7 +425,7 @@ export default function App() {
                 onClick={() => setGuideOpen(true)}
               >
                 <CircleHelp className="size-4 shrink-0" />
-                Follow the setup guide to have Claude review your book with your own Claude account
+                Follow the setup guide to review with your Claude account instead of an API key
               </button>
             )}
 
@@ -417,12 +455,21 @@ export default function App() {
                     <span className="w-12 text-right text-sm font-medium tabular-nums">{settings.chunkWords}</span>
                   </SettingRow>
                   <SettingRow icon={BrainCircuit} label="Model that reviews each section">
-                    <ModelSelect
-                      value={settings.cliModel}
-                      options={CLI_MODELS}
-                      disabled={busy}
-                      onChange={(cliModel) => updateSettings({ cliModel })}
-                    />
+                    {usingCli ? (
+                      <ModelSelect
+                        value={settings.cliModel}
+                        options={CLI_MODELS}
+                        disabled={busy}
+                        onChange={(cliModel) => updateSettings({ cliModel })}
+                      />
+                    ) : (
+                      <ModelSelect
+                        value={settings.apiModel}
+                        options={API_MODELS}
+                        disabled={busy}
+                        onChange={(apiModel) => updateSettings({ apiModel })}
+                      />
+                    )}
                   </SettingRow>
                   <SettingRow icon={RefreshCw} label="Review every section again instead of reusing earlier results">
                     <Switch

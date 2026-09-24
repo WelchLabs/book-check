@@ -2,8 +2,30 @@ import { z } from "zod"
 
 export const PROMPT_VERSION = "2026-07-03.1"
 
-export const CLI_MODELS = ["sonnet", "opus", "haiku"] as const
-export type CliModel = (typeof CLI_MODELS)[number]
+export const MODELS = [
+  "claude-fable-5-1",
+  "claude-opus-5-5",
+  "claude-opus-5",
+  "claude-sonnet-5",
+  "claude-haiku-4-5",
+] as const
+export type Model = (typeof MODELS)[number]
+
+export const MODEL_LABELS: Record<Model, string> = {
+  "claude-fable-5-1": "Claude Fable 5.1",
+  "claude-opus-5-5": "Claude Opus 5.5",
+  "claude-opus-5": "Claude Opus 5",
+  "claude-sonnet-5": "Claude Sonnet 5",
+  "claude-haiku-4-5": "Claude Haiku 4.5",
+}
+
+export const CLI_MODELS = MODELS
+export type CliModel = Model
+
+export const API_MODELS = MODELS
+export type ApiModel = Model
+
+export const FALLBACK_MODELS: readonly Model[] = ["claude-fable-5-1", "claude-opus-5"]
 
 export const SYSTEM_PROMPT = `You are a meticulous senior copy editor reviewing extracted pages from a designed nonfiction book.
 
