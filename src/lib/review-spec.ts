@@ -25,6 +25,29 @@ export type CliModel = Model
 export const API_MODELS = MODELS
 export type ApiModel = Model
 
+export const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
+export type ClaudeEffort = (typeof CLAUDE_EFFORTS)[number]
+export const CLAUDE_MODEL_EFFORTS: Record<Model, readonly ClaudeEffort[]> = {
+  "claude-fable-5-1": CLAUDE_EFFORTS,
+  "claude-opus-5-5": CLAUDE_EFFORTS,
+  "claude-opus-5": CLAUDE_EFFORTS,
+  "claude-sonnet-5": CLAUDE_EFFORTS,
+  "claude-haiku-4-5": [],
+}
+export const claudeDefaultEffort = (model: Model): ClaudeEffort => model === "claude-opus-5-5" ? "medium" : "high"
+
+export const CODEX_MODEL = "default" as const
+export type CodexModel = string
+export const CODEX_EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"] as const
+export type CodexEffort = "default" | (typeof CODEX_EFFORTS)[number]
+export interface CodexModelOption {
+  id: string
+  label: string
+  description: string
+  defaultEffort: string
+  efforts: string[]
+}
+
 export const FALLBACK_MODELS: readonly Model[] = ["claude-fable-5-1", "claude-opus-5"]
 
 export const SYSTEM_PROMPT = `You are a meticulous senior copy editor reviewing extracted pages from a designed nonfiction book.

@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
-const HELPER_FILE_URL = "https://welchlabs.github.io/book-check/claude-helper.mjs"
+const HELPER_FILE_URL = "https://welchlabs.github.io/book-check/book-check-helper.mjs"
 
 type System = "mac" | "windows"
+type Service = "claude" | "codex"
 
 interface Step {
   title: string
@@ -16,52 +17,57 @@ interface Step {
   link?: { href: string; label: string }
 }
 
-const STEPS: Record<System, Step[]> = {
-  mac: [
-    { title: "Open Terminal", detail: "Press Cmd and Space, type Terminal, and press Return." },
-    { title: "Install Claude Code", command: "curl -fsSL https://claude.ai/install.sh | bash" },
-    {
-      title: "Sign in to Claude",
-      detail: "If the command is not found, close Terminal, open it again, and retry.",
-      command: "claude auth login",
+const SERVICES: Record<Service, { name: string; install: Record<System, string>; login: string; choice: string }> = {
+  claude: {
+    name: "Claude Code",
+    install: {
+      mac: "curl -fsSL https://claude.ai/install.sh | bash",
+      windows: "irm https://claude.ai/install.ps1 | iex",
     },
-    {
-      title: "Install Node.js",
-      detail: "Download the LTS version and open the installer.",
-      link: { href: "https://nodejs.org/en/download", label: "Open nodejs.org" },
-    },
-    {
-      title: "Start the helper",
-      detail: "This saves the helper in a hidden .book-check folder in your home folder. Keep this Terminal window open while you use the site.",
-      command: `curl -fsSL ${HELPER_FILE_URL} --create-dirs -o ~/.book-check/claude-helper.mjs && node ~/.book-check/claude-helper.mjs`,
-    },
-    { title: "Come back to this page", detail: "The start page now shows a switch to review with Claude." },
-  ],
-  windows: [
-    { title: "Open PowerShell", detail: "Press the Windows key, type PowerShell, and press Enter." },
-    { title: "Install Claude Code", command: "irm https://claude.ai/install.ps1 | iex" },
-    {
-      title: "Sign in to Claude",
-      detail: "If the command is not found, close PowerShell, open it again, and retry.",
-      command: "claude auth login",
-    },
-    {
-      title: "Install Node.js",
-      detail: "Download the LTS version and open the installer.",
-      link: { href: "https://nodejs.org/en/download", label: "Open nodejs.org" },
-    },
-    {
-      title: "Start the helper",
-      detail: "This saves the helper in a hidden .book-check folder in your home folder. Keep this PowerShell window open while you use the site.",
-      command: `curl.exe -fsSL ${HELPER_FILE_URL} --create-dirs -o $HOME\\.book-check\\claude-helper.mjs; node $HOME\\.book-check\\claude-helper.mjs`,
-    },
-    { title: "Come back to this page", detail: "The start page now shows a switch to review with Claude." },
-  ],
+    login: "claude auth login",
+    choice: "Claude CLI",
+  },
+  codex: {
+    name: "Codex CLI",
+    install: { mac: "npm install -g @openai/codex", windows: "npm install -g @openai/codex" },
+    login: "codex login",
+    choice: "Codex CLI",
+  },
 }
 
-const NEXT_TIME: Record<System, string> = {
-  mac: "node ~/.book-check/claude-helper.mjs",
-  windows: "node $HOME\\.book-check\\claude-helper.mjs",
+const HELPER_COMMANDS: Record<System, { start: string; next: string }> = {
+  mac: {
+    start: `curl -fsSL ${HELPER_FILE_URL} --create-dirs -o ~/.book-check/book-check-helper.mjs && node ~/.book-check/book-check-helper.mjs`,
+    next: "node ~/.book-check/book-check-helper.mjs",
+  },
+  windows: {
+    start: `curl.exe -fsSL ${HELPER_FILE_URL} --create-dirs -o $HOME\\.book-check\\book-check-helper.mjs; node $HOME\\.book-check\\book-check-helper.mjs`,
+    next: "node $HOME\\.book-check\\book-check-helper.mjs",
+  },
+}
+
+function setupSteps(system: System, service: Service): Step[] {
+  const chosen = SERVICES[service]
+  const terminal = system === "mac" ? "Terminal" : "PowerShell"
+  return [
+    {
+      title: `Open ${terminal}`,
+      detail: system === "mac" ? "Press Cmd and Space, type Terminal, and press Return." : "Press the Windows key, type PowerShell, and press Enter.",
+    },
+    {
+      title: "Install Node.js",
+      detail: "Download the LTS version and open the installer.",
+      link: { href: "https://nodejs.org/en/download", label: "Open nodejs.org" },
+    },
+    { title: `Install ${chosen.name}`, command: chosen.install[system] },
+    { title: `Sign in to ${chosen.name}`, detail: `If the command is not found, reopen ${terminal} and retry.`, command: chosen.login },
+    {
+      title: "Start the helper",
+      detail: `Keep this ${terminal} window open while you use the site.`,
+      command: HELPER_COMMANDS[system].start,
+    },
+    { title: "Come back to this page", detail: `Choose ${chosen.choice} from the review menu.` },
+  ]
 }
 
 function CommandLine({ command }: { command: string }) {
@@ -86,11 +92,12 @@ function CommandLine({ command }: { command: string }) {
   )
 }
 
-function StepList({ system }: { system: System }) {
+function StepList({ system, service }: { system: System; service: Service }) {
+  const steps = setupSteps(system, service)
   return (
     <div className="flex min-w-0 flex-col gap-5">
       <ol className="flex flex-col gap-4">
-        {STEPS[system].map((step, index) => (
+        {steps.map((step, index) => (
           <li key={step.title} className="flex gap-3">
             <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
               {index + 1}
@@ -116,9 +123,9 @@ function StepList({ system }: { system: System }) {
       </ol>
       <div className="flex flex-col gap-1.5 border-t pt-4">
         <span className="text-sm text-muted-foreground">
-          After the first setup, run this command whenever you want Claude to review a book.
+          After the first setup, run this command whenever you want {service === "codex" ? "Codex" : "Claude"} to review a book.
         </span>
-        <CommandLine command={NEXT_TIME[system]} />
+        <CommandLine command={HELPER_COMMANDS[system].next} />
       </div>
     </div>
   )
@@ -130,21 +137,29 @@ export function SetupGuide({ open, onOpenChange }: { open: boolean; onOpenChange
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90svh] overflow-y-auto p-6 sm:max-w-xl! [&>*]:min-w-0">
         <DialogHeader>
-          <DialogTitle>Set up Claude reviews</DialogTitle>
+          <DialogTitle>Set up AI reviews</DialogTitle>
           <DialogDescription>
-            Follow these steps to let this site review your book with your own Claude account.
+            Follow these steps to review your book with your Claude or Codex account.
           </DialogDescription>
         </DialogHeader>
-        <Tabs defaultValue={defaultSystem}>
-          <TabsList>
-            <TabsTrigger value="mac">Mac</TabsTrigger>
-            <TabsTrigger value="windows">Windows</TabsTrigger>
+        <Tabs defaultValue={`claude-${defaultSystem}`}>
+          <TabsList className="grid h-auto w-full grid-cols-2 sm:grid-cols-4">
+            <TabsTrigger value="claude-mac">Claude · Mac</TabsTrigger>
+            <TabsTrigger value="claude-windows">Claude · Windows</TabsTrigger>
+            <TabsTrigger value="codex-mac">Codex · Mac</TabsTrigger>
+            <TabsTrigger value="codex-windows">Codex · Windows</TabsTrigger>
           </TabsList>
-          <TabsContent value="mac" className="pt-4">
-            <StepList system="mac" />
+          <TabsContent value="claude-mac" className="pt-4">
+            <StepList system="mac" service="claude" />
           </TabsContent>
-          <TabsContent value="windows" className="pt-4">
-            <StepList system="windows" />
+          <TabsContent value="claude-windows" className="pt-4">
+            <StepList system="windows" service="claude" />
+          </TabsContent>
+          <TabsContent value="codex-mac" className="pt-4">
+            <StepList system="mac" service="codex" />
+          </TabsContent>
+          <TabsContent value="codex-windows" className="pt-4">
+            <StepList system="windows" service="codex" />
           </TabsContent>
         </Tabs>
       </DialogContent>

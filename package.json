@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && bun build server/standalone.ts --target=node --format=esm --outfile=dist/claude-helper.mjs",
+    "build": "tsc && vite build && bun build server/standalone.ts --target=node --format=esm --outfile=dist/book-check-helper.mjs && cp dist/book-check-helper.mjs dist/claude-helper.mjs",
     "preview": "vite preview",
     "claude-server": "bun server/standalone.ts"
   },

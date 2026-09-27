@@ -8,19 +8,24 @@ import {
   userPrompt,
   type ApiModel,
   type CliModel,
+  type CodexModel,
+  type CodexEffort,
+  type CodexModelOption,
+  type ClaudeEffort,
   type RawChunkReview,
 } from "./review-spec"
 import type { AiUsage, ChunkData, Finding } from "./types"
 
 export type Provider =
-  | { kind: "cli"; model: CliModel; endpoint: string }
-  | { kind: "api"; apiKey: string; model: ApiModel }
+  | { kind: "cli"; model: CliModel; effort?: ClaudeEffort; endpoint: string }
+  | { kind: "codex"; model: CodexModel; effort: CodexEffort; endpoint: string }
+  | { kind: "api"; apiKey: string; model: ApiModel; effort?: ClaudeEffort }
 
 type Reviewer = (text: string) => Promise<RawChunkReview>
 
 class AuthError extends Error {}
 
-async function apiReviewer(apiKey: string, model: ApiModel): Promise<Reviewer> {
+async function apiReviewer(apiKey: string, model: ApiModel, effort?: ClaudeEffort): Promise<Reviewer> {
   const [{ default: Anthropic }, { betaZodOutputFormat }] = await Promise.all([
     import("@anthropic-ai/sdk"),
     import("@anthropic-ai/sdk/helpers/beta/zod"),
@@ -36,7 +41,7 @@ async function apiReviewer(apiKey: string, model: ApiModel): Promise<Reviewer> {
           : {}),
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: userPrompt(text) }],
-        output_config: { format: betaZodOutputFormat(ReviewSchema) },
+        output_config: { format: betaZodOutputFormat(ReviewSchema), ...(effort ? { effort } : {}) },
       })
       if (response.stop_reason === "refusal") throw new Error("Claude declined to review this excerpt.")
       if (!response.parsed_output) throw new Error("Claude completed without a structured result.")
@@ -54,25 +59,25 @@ async function apiReviewer(apiKey: string, model: ApiModel): Promise<Reviewer> {
 
 export const HELPER_URL = "http://localhost:4317"
 
-const CLI_ENDPOINTS = ["/api/claude", `${HELPER_URL}/api/claude`]
+const cliEndpoints = (name: "claude" | "codex") => [`/api/${name}`, `${HELPER_URL}/api/${name}`]
 
-const cliReviewer = (model: CliModel, endpoint: string): Reviewer => async (text) => {
+const cliReviewer = (model: CliModel | CodexModel, endpoint: string, effort?: CodexEffort | ClaudeEffort): Reviewer => async (text) => {
   const response = await fetch(`${endpoint}/review`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, model }),
+    body: JSON.stringify({ text, model, effort }),
   })
   const body = await response.json()
-  if (!response.ok) throw new Error(body.error ?? "Claude review failed.")
+  if (!response.ok) throw new Error(body.error ?? "AI review failed.")
   return body as RawChunkReview
 }
 
-export async function claudeCliStatus(): Promise<{ ready: boolean; message: string; endpoint: string | null }> {
-  for (const endpoint of CLI_ENDPOINTS) {
+export async function cliStatus(name: "claude" | "codex"): Promise<{ ready: boolean; message: string; endpoint: string | null; models?: CodexModelOption[] }> {
+  for (const endpoint of cliEndpoints(name)) {
     try {
       const response = await fetch(`${endpoint}/status`)
       if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) continue
-      const status = (await response.json()) as { ready: boolean; message: string }
+      const status = (await response.json()) as { ready: boolean; message: string; models?: CodexModelOption[] }
       return { ...status, endpoint }
     } catch {}
   }
@@ -88,7 +93,7 @@ interface ChunkReview {
 }
 
 const cacheKey = (chunk: ChunkData, provider: Provider) =>
-  sha256Hex([PROMPT_VERSION, provider.kind === "cli" ? "claude" : "claude-api", provider.model, chunk.text].join("\u001f"))
+  sha256Hex([PROMPT_VERSION, provider.kind === "cli" ? "claude" : provider.kind === "codex" ? "codex" : "claude-api", provider.model, provider.effort ?? "", chunk.text].join("\u001f"))
 
 async function reviewChunk(
   review: Reviewer,
@@ -138,9 +143,9 @@ export async function runAiReview(
   progress: (done: number, total: number) => void,
 ): Promise<{ findings: Finding[]; usage: AiUsage; errors: string[] }> {
   const review =
-    provider.kind === "cli"
-      ? cliReviewer(provider.model, provider.endpoint)
-      : await apiReviewer(provider.apiKey, provider.model)
+    provider.kind === "cli" || provider.kind === "codex"
+      ? cliReviewer(provider.model, provider.endpoint, provider.effort)
+      : await apiReviewer(provider.apiKey, provider.model, provider.effort)
   const reviews: ChunkReview[] = []
   const errors: string[] = []
   let next = 0

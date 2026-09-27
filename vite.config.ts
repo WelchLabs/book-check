@@ -4,10 +4,11 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 import { claudeCliPlugin } from './server/claude-cli.ts'
+import { codexCliPlugin } from './server/codex-cli.ts'
 
 export default defineConfig({
   base: process.env.BASE_PATH ?? '/',
-  plugins: [react(), tailwindcss(), claudeCliPlugin()],
+  plugins: [react(), tailwindcss(), claudeCliPlugin(), codexCliPlugin()],
   build: {
     rolldownOptions: {
       output: {

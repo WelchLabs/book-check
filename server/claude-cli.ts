@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http"
 import type { Connect, Plugin } from "vite"
 import { z } from "zod"
 
-import { CLI_MODELS, ReviewSchema, SYSTEM_PROMPT, userPrompt, type CliModel, type RawChunkReview } from "../src/lib/review-spec.ts"
+import { CLAUDE_MODEL_EFFORTS, CLI_MODELS, ReviewSchema, SYSTEM_PROMPT, userPrompt, type ClaudeEffort, type CliModel, type RawChunkReview } from "../src/lib/review-spec.ts"
 
 const { $schema: _metaSchema, ...schema } = z.toJSONSchema(ReviewSchema)
 const SCHEMA = JSON.stringify(schema)
@@ -49,17 +49,19 @@ function resultEnvelope(stdout: string): Record<string, unknown> {
   throw new Error("Claude did not return a result envelope.")
 }
 
-export async function reviewWithClaude(text: string, model: CliModel): Promise<RawChunkReview> {
+export async function reviewWithClaude(text: string, model: CliModel, effort?: ClaudeEffort): Promise<RawChunkReview> {
   const prompt = `Do not inspect the filesystem, run commands, browse, or use tools. Review only the excerpt supplied below and return the requested structured result.\n\n${userPrompt(text)}`
   const { code, stdout, stderr } = await runClaude(
     [
       "-p",
       "--model", model,
+      ...(effort ? ["--effort", effort] : []),
       "--append-system-prompt", SYSTEM_PROMPT,
       "--output-format", "json",
       "--json-schema", SCHEMA,
-      "--permission-mode", "default",
-      "--disallowed-tools", "Bash,Edit,Write,Read,WebFetch,WebSearch",
+      "--permission-mode", "dontAsk",
+      "--tools", "",
+      "--no-session-persistence",
     ],
     prompt,
   )
@@ -104,9 +106,10 @@ export async function handleClaudeRequest(req: IncomingMessage, res: ServerRespo
   }
   if (path === "/api/claude/review" && req.method === "POST") {
     try {
-      const { text, model } = JSON.parse(await readBody(req)) as { text: string; model: CliModel }
+      const { text, model, effort } = JSON.parse(await readBody(req)) as { text: string; model: CliModel; effort?: ClaudeEffort }
       if (!CLI_MODELS.includes(model)) throw new Error(`Unknown model: ${model}`)
-      sendJson(res, 200, await reviewWithClaude(text, model))
+      if (effort && !CLAUDE_MODEL_EFFORTS[model].includes(effort)) throw new Error(`Unsupported Claude effort: ${effort}`)
+      sendJson(res, 200, await reviewWithClaude(text, model, effort))
     } catch (error) {
       sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) })
     }

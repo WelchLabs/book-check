@@ -10,61 +10,39 @@ Check a book PDF for spelling, grammar, and style problems, right in your browse
 2. Drop your book PDF onto the page.
 3. Press the start button, then read through the findings and remove any that are wrong.
 
-That runs the built in checks. To also have Claude review the book, follow the setup steps below or use an Anthropic API key.
+That runs the built in checks. To also have Claude or Codex review the book, follow the setup steps below. An Anthropic API key is another option for Claude.
 
-## Set up Claude reviews
+## Set up Claude or Codex reviews
 
-You do not need to download this project. You only need Claude Code, Node.js, and one command.
+You do not need to download this project. Both CLIs use the same local helper:
 
-### Mac
+1. Install the LTS version of [Node.js](https://nodejs.org/en/download).
+2. Install and sign in to the CLI you want to use:
 
-1. **Open Terminal.** Press Cmd and Space, type `Terminal`, press Return.
-2. **Install Claude Code.** Paste this and press Return:
+   | CLI | Mac install | Windows install | Sign in |
+   | --- | --- | --- | --- |
+   | Claude Code | `curl -fsSL https://claude.ai/install.sh \| bash` | `irm https://claude.ai/install.ps1 \| iex` | `claude auth login` |
+   | Codex CLI | `npm install -g @openai/codex` | `npm install -g @openai/codex` | `codex login` |
+
+3. Start the helper and keep its terminal window open while using the site.
+
+   **Mac (Terminal):**
+
    ```sh
-   curl -fsSL https://claude.ai/install.sh | bash
+   curl -fsSL https://welchlabs.github.io/book-check/book-check-helper.mjs --create-dirs -o ~/.book-check/book-check-helper.mjs && node ~/.book-check/book-check-helper.mjs
    ```
-3. **Sign in to Claude.** If the command is not found, close Terminal, open it again, and retry.
-   ```sh
-   claude auth login
-   ```
-4. **Install Node.js.** Download the LTS version from [nodejs.org](https://nodejs.org/en/download) and open the installer.
-5. **Start the helper.** Keep this window open while you use the site.
-   ```sh
-   curl -fsSL https://welchlabs.github.io/book-check/claude-helper.mjs --create-dirs -o ~/.book-check/claude-helper.mjs && node ~/.book-check/claude-helper.mjs
-   ```
-6. **Go back to the site.** A switch to review with Claude now appears.
 
-Next time, open Terminal and run only:
+   **Windows (PowerShell):**
 
-```sh
-node ~/.book-check/claude-helper.mjs
-```
-
-### Windows
-
-1. **Open PowerShell.** Press the Windows key, type `PowerShell`, press Enter.
-2. **Install Claude Code.**
    ```powershell
-   irm https://claude.ai/install.ps1 | iex
+   curl.exe -fsSL https://welchlabs.github.io/book-check/book-check-helper.mjs --create-dirs -o $HOME\.book-check\book-check-helper.mjs; node $HOME\.book-check\book-check-helper.mjs
    ```
-3. **Sign in to Claude.** If the command is not found, close PowerShell, open it again, and retry.
-   ```powershell
-   claude auth login
-   ```
-4. **Install Node.js.** Download the LTS version from [nodejs.org](https://nodejs.org/en/download) and open the installer.
-5. **Start the helper.** Keep this window open while you use the site.
-   ```powershell
-   curl.exe -fsSL https://welchlabs.github.io/book-check/claude-helper.mjs --create-dirs -o $HOME\.book-check\claude-helper.mjs; node $HOME\.book-check\claude-helper.mjs
-   ```
-6. **Go back to the site.** A switch to review with Claude now appears.
 
-Next time, open PowerShell and run only:
+4. Return to the site, choose **Claude CLI** or **Codex CLI**, then choose a model and supported reasoning depth.
 
-```powershell
-node $HOME\.book-check\claude-helper.mjs
-```
+Next time, start the helper with `node ~/.book-check/book-check-helper.mjs` on Mac or `node $HOME\.book-check\book-check-helper.mjs` on Windows. The same steps are in the site's setup guide.
 
-The same steps are on the site under the help button in the top right.
+The helper runs Codex reviews in a temporary directory with a read only sandbox and a structured output schema.
 
 ## Use an Anthropic API key instead
 
@@ -72,11 +50,11 @@ If you have an Anthropic API key, you can skip the setup above. Paste the key in
 
 ## Choosing a model
 
-Both ways of reviewing offer the same models on the start page: Claude Fable 5.1, Claude Opus 5.5, Claude Opus 5, Claude Sonnet 5, and Claude Haiku 4.5. Fable and Opus are the most capable. Sonnet and Haiku are faster and use less of your plan or credits.
+Claude CLI and Anthropic API reviews offer the same models on the start page: Claude Fable 5.1, Claude Opus 5.5, Claude Opus 5, Claude Sonnet 5, and Claude Haiku 4.5. Codex reviews offer the named models listed by your local Codex CLI. Both providers show the reasoning depths supported by the selected model; Claude Haiku 4.5 does not support this setting.
 
 ## Good to know
 
 - **Browser:** use Chrome, Edge, or Firefox. Safari blocks the site from talking to the helper. If Chrome asks to access devices on your local network, allow it.
-- **Cost:** reviews through the helper use your Claude plan. Reviews with an API key are billed to that key.
+- **Cost:** CLI reviews use the account signed in to the selected CLI. Reviews with an Anthropic API key are billed to that key.
 - **Privacy:** the helper only runs on your computer and only answers this site.
 - **Saving:** your results stay in the browser after a reload. Use the save button to get a JSON file you can send to someone. They drop it onto the site to see the same report.

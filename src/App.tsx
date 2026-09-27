@@ -42,7 +42,7 @@ import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { claudeCliStatus, type Provider } from "@/lib/ai-review"
+import { cliStatus, type Provider } from "@/lib/ai-review"
 import {
   deleteReport,
   listReports,
@@ -55,7 +55,7 @@ import {
 import { parseAllowlist } from "@/lib/local-checks"
 import { runPipeline, type Stage } from "@/lib/pipeline"
 import { downloadFile, markdownReport, reportBaseName } from "@/lib/report"
-import { API_MODELS, CLI_MODELS, MODEL_LABELS, type ApiModel, type CliModel } from "@/lib/review-spec"
+import { API_MODELS, CLAUDE_EFFORTS, CLAUDE_MODEL_EFFORTS, CLI_MODELS, CODEX_EFFORTS, MODEL_LABELS, claudeDefaultEffort, type ApiModel, type ClaudeEffort, type CliModel, type CodexEffort, type CodexModelOption } from "@/lib/review-spec"
 import { parseSavedReport } from "@/lib/saved-report"
 import { countFindings, type Finding, type ReviewReport, type Severity } from "@/lib/types"
 
@@ -67,6 +67,9 @@ interface Settings {
   chunkWords: number
   cliModel: CliModel
   apiModel: ApiModel
+  claudeEffort: ClaudeEffort | ""
+  codexModel: string
+  codexEffort: CodexEffort | ""
   refreshAi: boolean
 }
 
@@ -75,6 +78,9 @@ const DEFAULT_SETTINGS: Settings = {
   chunkWords: 2200,
   cliModel: "claude-sonnet-5",
   apiModel: "claude-opus-5",
+  claudeEffort: "",
+  codexModel: "",
+  codexEffort: "",
   refreshAi: false,
 }
 
@@ -108,7 +114,7 @@ const UNPRESSED = "not-data-[pressed]:opacity-40 not-data-[pressed]:line-through
 const STAGE_TEXT: Record<Stage, (done: number, total: number) => string> = {
   extract: (done, total) => `Reading page ${done} of ${total}`,
   local: () => "Running spelling and grammar checks",
-  ai: (done, total) => `Claude has reviewed ${done} of ${total} sections`,
+  ai: (done, total) => `AI has reviewed ${done} of ${total} sections`,
   done: () => "Finishing the report",
 }
 
@@ -120,6 +126,12 @@ function readSettings(): Settings {
       ...stored,
       cliModel: CLI_MODELS.includes(stored.cliModel) ? stored.cliModel : DEFAULT_SETTINGS.cliModel,
       apiModel: API_MODELS.includes(stored.apiModel) ? stored.apiModel : DEFAULT_SETTINGS.apiModel,
+      claudeEffort: CLAUDE_EFFORTS.includes(stored.claudeEffort as ClaudeEffort)
+        ? stored.claudeEffort : DEFAULT_SETTINGS.claudeEffort,
+      codexModel: typeof stored.codexModel === "string" ? stored.codexModel : DEFAULT_SETTINGS.codexModel,
+      codexEffort: CODEX_EFFORTS.includes(stored.codexEffort as (typeof CODEX_EFFORTS)[number])
+        ? stored.codexEffort
+        : DEFAULT_SETTINGS.codexEffort,
     }
   } catch {
     return DEFAULT_SETTINGS
@@ -177,18 +189,20 @@ function SettingRow({ icon: Icon, label, children }: { icon: LucideIcon; label: 
 function ModelSelect<T extends string>({
   value,
   options,
+  labels = MODEL_LABELS,
   disabled,
   onChange,
 }: {
   value: T
   options: readonly T[]
+  labels?: Record<string, string>
   disabled: boolean
   onChange: (value: T) => void
 }) {
   return (
     <Select
       value={value}
-      items={options.map((option) => ({ value: option, label: MODEL_LABELS[option as CliModel] ?? option }))}
+      items={options.map((option) => ({ value: option, label: labels[option] ?? option }))}
       disabled={disabled}
       onValueChange={(v) => v && onChange(v as T)}
     >
@@ -198,7 +212,7 @@ function ModelSelect<T extends string>({
       <SelectContent alignItemWithTrigger={false}>
         {options.map((option) => (
           <SelectItem key={option} value={option}>
-            {MODEL_LABELS[option as CliModel] ?? option}
+            {labels[option] ?? option}
           </SelectItem>
         ))}
       </SelectContent>
@@ -215,14 +229,22 @@ export default function App() {
   const [stage, setStage] = useState<Stage | null>(null)
   const [progress, setProgress] = useState({ done: 0, total: 0 })
   const [error, setError] = useState("")
-  const [cliEndpoint, setCliEndpoint] = useState<string | null>(null)
-  const [useCli, setUseCli] = useState(true)
+  const [claudeEndpoint, setClaudeEndpoint] = useState<string | null>(null)
+  const [codexEndpoint, setCodexEndpoint] = useState<string | null>(null)
+  const [codexModels, setCodexModels] = useState<CodexModelOption[]>([])
+  const [selectedMethod, setSelectedMethod] = useState<"builtin" | "claude" | "codex" | "api" | null>(null)
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [guideOpen, setGuideOpen] = useState(false)
   const [pending, setPending] = useState<{ pdf: File; allowedWords: string[] } | null>(null)
 
   useEffect(() => {
-    const checkCli = () => claudeCliStatus().then((status) => setCliEndpoint(status.ready ? status.endpoint : null))
+    const checkCli = () => {
+      cliStatus("claude").then((status) => setClaudeEndpoint(status.ready ? status.endpoint : null))
+      cliStatus("codex").then((status) => {
+        setCodexEndpoint(status.ready ? status.endpoint : null)
+        setCodexModels(status.models ?? [])
+      })
+    }
     checkCli()
     window.addEventListener("focus", checkCli)
     listReports().then(setHistory)
@@ -243,13 +265,25 @@ export default function App() {
   }
 
   const busy = stage !== null
-  const cliReady = cliEndpoint !== null
-  const usingCli = cliReady && useCli
-  const provider: Provider | null = usingCli
-    ? { kind: "cli", model: settings.cliModel, endpoint: cliEndpoint }
-    : apiKey.trim()
-      ? { kind: "api", apiKey: apiKey.trim(), model: settings.apiModel }
-      : null
+  const method = selectedMethod ?? (claudeEndpoint ? "claude" : codexEndpoint ? "codex" : "api")
+  const codexModel = codexModels.some((option) => option.id === settings.codexModel)
+    ? settings.codexModel : codexModels[0]?.id ?? ""
+  const selectedCodexModel = codexModels.find((option) => option.id === codexModel)
+  const codexEffort: CodexEffort = selectedCodexModel?.efforts.includes(settings.codexEffort)
+    ? settings.codexEffort as CodexEffort : (selectedCodexModel?.defaultEffort ?? "medium") as CodexEffort
+  const codexLabels = Object.fromEntries(codexModels.map((option) => [option.id, option.label]))
+  const claudeModel = method === "claude" ? settings.cliModel : settings.apiModel
+  const claudeEfforts = CLAUDE_MODEL_EFFORTS[claudeModel]
+  const claudeEffort = claudeEfforts.includes(settings.claudeEffort as ClaudeEffort)
+    ? settings.claudeEffort as ClaudeEffort : claudeDefaultEffort(claudeModel)
+  const provider: Provider | null = method === "claude" && claudeEndpoint
+    ? { kind: "cli", model: settings.cliModel, effort: claudeEfforts.length ? claudeEffort : undefined, endpoint: claudeEndpoint }
+    : method === "codex" && codexEndpoint
+      ? { kind: "codex", model: codexModel, effort: codexEffort, endpoint: codexEndpoint }
+      : method === "api" && apiKey.trim()
+        ? { kind: "api", apiKey: apiKey.trim(), model: settings.apiModel, effort: claudeEfforts.length ? claudeEffort : undefined }
+        : null
+  const aiName = method === "codex" ? "Codex" : "Claude"
 
   function openReport(next: ReviewReport | null, isNew = false) {
     if (!next) setCurrentReport(null).catch(() => {})
@@ -384,7 +418,7 @@ export default function App() {
                 </IconTip>
               </>
             )}
-            <IconTip label="How to set up Claude reviews from scratch">
+            <IconTip label="How to set up Claude or Codex reviews">
               <Button variant="ghost" size="icon" onClick={() => setGuideOpen(true)}>
                 <CircleHelp />
               </Button>
@@ -395,14 +429,20 @@ export default function App() {
 
         {!report && (
           <div className="flex flex-col gap-4">
-            {cliReady && (
-              <label className="flex items-center gap-3 rounded-lg border px-3 py-2 text-sm">
-                <SquareTerminal className="size-4 text-muted-foreground" />
-                <span className="flex-1">Review with Claude through your local claude -p login</span>
-                <Switch checked={useCli} disabled={busy} onCheckedChange={setUseCli} />
-              </label>
-            )}
-            {!usingCli && (
+            <div className="flex items-center gap-3 rounded-lg border px-3 py-2 text-sm">
+              <SquareTerminal className="size-4 text-muted-foreground" />
+              <span className="flex-1">Review with</span>
+              <Select value={method} disabled={busy} onValueChange={(value) => value && setSelectedMethod(value as typeof method)}>
+                <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="builtin">Built in checks only</SelectItem>
+                  {claudeEndpoint && <SelectItem value="claude">Claude CLI</SelectItem>}
+                  {codexEndpoint && <SelectItem value="codex">Codex CLI</SelectItem>}
+                  <SelectItem value="api">Anthropic API key</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {method === "api" && (
               <div className="relative">
                 <KeyRound className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -418,21 +458,21 @@ export default function App() {
                 />
               </div>
             )}
-            {!cliReady && (
+            {!claudeEndpoint && !codexEndpoint && (
               <button
                 type="button"
                 className="flex w-fit items-center gap-2 text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
                 onClick={() => setGuideOpen(true)}
               >
                 <CircleHelp className="size-4 shrink-0" />
-                Follow the setup guide to review with your Claude account instead of an API key
+                Follow the setup guide to review with your Claude or Codex account
               </button>
             )}
 
             {provider && (
               <Card size="sm">
                 <CardContent className="flex flex-col gap-5">
-                  <SettingRow icon={Users} label="How many Claude reviews run at the same time">
+                  <SettingRow icon={Users} label={`How many ${aiName} reviews run at the same time`}>
                     <Slider
                       min={1}
                       max={8}
@@ -443,7 +483,7 @@ export default function App() {
                     />
                     <span className="w-12 text-right text-sm font-medium tabular-nums">{settings.workers}</span>
                   </SettingRow>
-                  <SettingRow icon={Layers} label="How many words Claude reads in each review">
+                  <SettingRow icon={Layers} label={`How many words ${aiName} reads in each review`}>
                     <Slider
                       min={500}
                       max={6000}
@@ -455,22 +495,55 @@ export default function App() {
                     <span className="w-12 text-right text-sm font-medium tabular-nums">{settings.chunkWords}</span>
                   </SettingRow>
                   <SettingRow icon={BrainCircuit} label="Model that reviews each section">
-                    {usingCli ? (
+                    {method === "codex" ? (
+                      <ModelSelect
+                        value={codexModel}
+                        options={codexModels.map((option) => option.id)}
+                        labels={codexLabels}
+                        disabled={busy}
+                        onChange={(codexModel) => updateSettings({ codexModel, codexEffort: "" })}
+                      />
+                    ) : method === "claude" ? (
                       <ModelSelect
                         value={settings.cliModel}
                         options={CLI_MODELS}
                         disabled={busy}
-                        onChange={(cliModel) => updateSettings({ cliModel })}
+                        onChange={(cliModel) => updateSettings({ cliModel, claudeEffort: "" })}
                       />
                     ) : (
                       <ModelSelect
                         value={settings.apiModel}
                         options={API_MODELS}
                         disabled={busy}
-                        onChange={(apiModel) => updateSettings({ apiModel })}
+                        onChange={(apiModel) => updateSettings({ apiModel, claudeEffort: "" })}
                       />
                     )}
                   </SettingRow>
+                  {method === "codex" && selectedCodexModel && (
+                    <SettingRow icon={BrainCircuit} label="Reasoning depth for each review">
+                      <ModelSelect
+                        value={codexEffort}
+                        options={selectedCodexModel.efforts as CodexEffort[]}
+                        labels={{ low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Maximum", ultra: "Ultra" }}
+                        disabled={busy}
+                        onChange={(codexEffort) => updateSettings({ codexEffort })}
+                      />
+                    </SettingRow>
+                  )}
+                  {(method === "claude" || method === "api") && claudeEfforts.length > 0 && (
+                    <SettingRow icon={BrainCircuit} label="Reasoning depth for each review">
+                      <ModelSelect
+                        value={claudeEffort}
+                        options={claudeEfforts}
+                        labels={{ low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Maximum" }}
+                        disabled={busy}
+                        onChange={(claudeEffort) => updateSettings({ claudeEffort })}
+                      />
+                    </SettingRow>
+                  )}
+                  {(method === "claude" || method === "api") && !claudeEfforts.length && (
+                    <p className="text-xs text-muted-foreground">This Claude model does not support reasoning depth settings.</p>
+                  )}
                   <SettingRow icon={RefreshCw} label="Review every section again instead of reusing earlier results">
                     <Switch
                       checked={settings.refreshAi}
@@ -497,7 +570,7 @@ export default function App() {
                 {stage ? (
                   <>
                     <Loader2 className="size-8 animate-spin text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">{STAGE_TEXT[stage](progress.done, progress.total)}</p>
+                    <p className="text-sm text-muted-foreground">{stage === "ai" ? `${aiName} has reviewed ${progress.done} of ${progress.total} sections` : STAGE_TEXT[stage](progress.done, progress.total)}</p>
                     {progress.total > 0 && stage !== "local" && (
                       <Progress value={(progress.done / progress.total) * 100} className="w-64" />
                     )}
@@ -530,7 +603,7 @@ export default function App() {
             {pending && (
               <Button size="lg" className="h-11 w-full text-base" disabled={busy} onClick={startCheck}>
                 {busy ? <Loader2 className="animate-spin" /> : <Play />}
-                {provider ? "Start the check with Claude and the built in checks" : "Start the built in checks"}
+                {provider ? `Start the check with ${aiName} and the built in checks` : "Start the built in checks"}
               </Button>
             )}
 
@@ -646,7 +719,7 @@ function ReportView({ report, onRemove }: { report: ReviewReport; onRemove: (fin
               {counts.local}
             </ToggleGroupItem>
           </IconTip>
-          <IconTip label="Findings from the Claude review">
+          <IconTip label="Findings from the AI review">
             <ToggleGroupItem value="ai" className={`${SOURCE_PRESSED} ${UNPRESSED}`}>
               <Bot />
               {counts.ai}
